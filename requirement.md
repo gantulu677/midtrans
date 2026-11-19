@@ -15,12 +15,12 @@ Do not build a replacement storefront, catalogue, cart, order history, customer 
 
 | Layer | Target |
 |---|---|
-| Frontend | React + Vite + TypeScript |
+| Frontend | React 19 + Vite + TypeScript + Tailwind CSS v4 + Konsta UI React v5 |
 | Backend | Supabase Auth, PostgreSQL, RLS, and Edge Functions |
 | Payment | Midtrans Snap Sandbox |
 | Frontend hosting | GitHub Pages |
 
-The frontend is a static application. Supabase handles trusted order and payment operations. Frontend hosting must never contain backend secrets or perform payment verification.
+The frontend is a static application. Use Tailwind CSS v4 for utility styling and Konsta UI React v5 for reusable interface components. Keep the existing storefront's page structure, routes, and visual conventions; do not redesign or replace it solely to adopt the UI library. Konsta UI v5 targets React 19, so the implementation must use a compatible React version. Supabase handles trusted order and payment operations. Frontend hosting must never contain backend secrets or perform payment verification.
 
 See [technical-spec.md](./technical-spec.md) for backend, database, security, and Midtrans integration rules. See [deployment.md](./deployment.md) for environment and deployment instructions.
 
@@ -64,7 +64,7 @@ Show Backend-Verified Status
 
 ## Frontend Requirements
 
-Integrate the payment action into the existing checkout and preserve the application's current routing, page structure, styling, and component conventions.
+Integrate the payment action into the existing checkout and preserve the application's current routing, page structure, and component conventions. Use Tailwind CSS v4 for styling and Konsta UI React v5 components where they fit the existing interface; avoid introducing a second component system or broad UI redesign.
 
 The existing checkout must show:
 - Order reference.
