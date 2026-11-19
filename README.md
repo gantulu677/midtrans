@@ -126,11 +126,13 @@ Responsibilities:
 - Never accept a client-supplied amount, customer ID, order status, or payment-success flag as authoritative.
 - Generate a unique Midtrans `order_id` for the payment attempt. Keep it within Midtrans's documented length and character constraints.
 - Create or safely reuse a payment attempt so repeated requests do not create unintended duplicate attempts.
+- Serialize concurrent Pay Now requests using an atomic database operation, transaction, unique constraint, or equivalent concurrency control. The policy must allow at most one active payment attempt per order at a time; a concurrent request must reuse the active attempt or receive a safe conflict response, not create another one.
+- A genuinely new Midtrans transaction attempt must receive a new unique Midtrans `order_id`; never reuse an identifier from a previous attempt.
 - Send the Snap transaction request to the **Sandbox** API using the Server Key.
 - Return the Snap token and only the minimal references needed by the frontend.
 - Handle API errors without marking the order as paid.
 
-For a new payment attempt, the Midtrans `order_id` must be unique. Do not reuse an identifier already used for a different Midtrans transaction. A retry must follow the persisted order/payment state and retry policy.
+For a new payment attempt, the Midtrans `order_id` must be unique. Do not reuse an identifier already used for a different Midtrans transaction. A retry must follow the persisted order/payment state and retry policy. Concurrent requests must be serialized so that only one active attempt exists for an order at a time; enforce this with an atomic claim/transaction and database uniqueness or an equivalent mechanism, not only a frontend button lock.
 
 ### 2. `midtrans-notification`
 
@@ -149,10 +151,10 @@ Responsibilities:
 - Compare the notification amount and currency, where available, with the saved payment attempt and related order.
 - Verify transaction status with the Midtrans Sandbox Get Transaction Status API as part of trusted reconciliation. Do not rely on an unverified browser callback or notification payload alone.
 - Confirm the status response refers to the expected transaction and matches the saved order/payment amount.
-- Treat a transaction as paid only when Midtrans confirms `status_code` is `200` and `transaction_status` is `settlement` or an accepted `capture`. For `capture`, require `fraud_status` to be `accept` when that field is returned.
+- Treat a transaction as paid only when the verified Midtrans status response has `status_code` `200` and `transaction_status` is `settlement` or an accepted `capture`. Whenever `fraud_status` is present, require it to be `accept` for both `settlement` and `capture`; do not mark a transaction paid when the fraud status is `challenge` or another non-accepted value.
 - Persist the verified Midtrans transaction details and update the order/payment state atomically where practical.
 - Handle repeated and out-of-order notifications idempotently. A stale notification must not downgrade an already verified paid order.
-- Return an appropriate HTTP response so Midtrans can determine whether notification delivery succeeded.
+- Keep notification processing efficient and return an appropriate HTTP response in under 5 seconds where practical, so Midtrans can determine promptly whether delivery succeeded. Avoid unnecessary blocking or long-running work in the notification request.
 
 Configure the notification function to accept external Midtrans requests without requiring a Supabase user JWT (for example, deploy with `--no-verify-jwt`). The function must still verify the Midtrans signature and transaction details itself. Disabling Supabase JWT verification does **not** mean trusting the request.
 
@@ -185,11 +187,11 @@ Configure the Sandbox Client Key using the frontend framework's environment-vari
 |---|---|
 | Create Snap transaction | `https://app.sandbox.midtrans.com/snap/v1/transactions` |
 | Snap.js | `https://app.sandbox.midtrans.com/snap/snap.js` |
-| Get transaction status | `https://api.sandbox.midtrans.com/v2/{order_id}/status` |
+| Get transaction status | `https://api.sandbox.midtrans.com/v2/{order_id_or_transaction_id}/status` |
 
-Use HTTP Basic Authentication for backend Midtrans API requests: Base64-encode `MIDTRANS_SERVER_KEY:` (Server Key as username and an empty password). Use the appropriate documented transaction identifier for status lookup when required.
+Use HTTP Basic Authentication for backend Midtrans API requests: Base64-encode `MIDTRANS_SERVER_KEY:` (Server Key as username and an empty password). The status endpoint accepts the documented `order_id` or `transaction_id` identifier; use `transaction_id` for BI-SNAP and DANA status lookups, as required by Midtrans.
 
-For Snap requests, calculate `gross_amount` from trusted order data and use an integer amount in the order's currency's smallest unit as required by Midtrans. Keep the amount consistent across the order, payment attempt, Snap request, notification, and status verification.
+For Snap requests, calculate `gross_amount` from trusted order data and send an integer in the amount unit expected by Midtrans for the selected currency. For IDR, send the rupiah amount as an integer (for example, `150000` for Rp150,000); do not multiply it by 100 or convert it to cents. Keep the amount consistent across the order, payment attempt, Snap request, notification, and status verification.
 
 ## Frontend Checkout
 
