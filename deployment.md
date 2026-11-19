@@ -14,6 +14,56 @@ This document covers local setup and deployment configuration for the planned Re
 
 GitHub Pages must never contain the Midtrans Server Key, Supabase service-role key, or other backend secrets. Payment verification runs only in trusted Supabase Edge Functions.
 
+## Frontend UI Dependencies
+
+The target frontend stack is React 19, Vite, TypeScript, Tailwind CSS v4, and Konsta UI React v5. Konsta UI v5 targets React 19.
+
+Install the Tailwind Vite integration and Konsta UI in the existing React application:
+
+```bash
+npm install tailwindcss @tailwindcss/vite konsta
+```
+
+If the application does not already have the React Vite plugin and React dependencies, inspect its existing package manifest before adding or changing them. Do not scaffold a second application or overwrite existing dependencies just to match this example.
+
+Add the Tailwind plugin to the existing Vite configuration while preserving the React plugin and the GitHub Pages `base` setting:
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  base: "/midtrans/",
+});
+```
+
+In the application's main CSS entry point, import Tailwind and the Konsta theme:
+
+```css
+@import "tailwindcss";
+@import "konsta/react/theme.css";
+```
+
+Import Konsta components from `konsta/react`. Wrap the relevant application tree with Konsta's `App` component and select one consistent theme (`ios` or `material`) appropriate to the existing storefront. Example:
+
+```tsx
+import { App, Page } from "konsta/react";
+
+export function StorefrontApp() {
+  return (
+    <App theme="ios">
+      <Page>
+        {/* Existing storefront routes and screens */}
+      </Page>
+    </App>
+  );
+}
+```
+
+Treat the snippet as an integration example, not a replacement for the existing app root or router. Preserve the current routing and application shell. If the actual app is not on React 19, resolve Konsta v5 compatibility before adopting it; do not assume the dependency can be added without checking the installed React version.
+
 ## Vite Configuration
 
 For a GitHub Pages project site, set Vite's `base` to the repository path. For this repository, the expected value is `/midtrans/`:
