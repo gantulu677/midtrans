@@ -15,7 +15,7 @@ This repository currently contains documentation only. The application, database
 | Payment | Midtrans Snap Sandbox |
 | Frontend hosting | GitHub Pages |
 
-The integration is intended to add a payment step to the existing product, cart, checkout, and order flow. It must not create a replacement storefront, cart, order history, or administration system.
+The integration adds only a payment step to the existing product, cart, checkout, and order flow. It must not create a replacement storefront or order-management system.
 
 ## Architecture at a Glance
 
@@ -25,18 +25,17 @@ The integration is intended to add a payment step to the existing product, cart,
 - Midtrans Sandbox processes test payments.
 - The backend is the sole authority for payment status. Browser callbacks and redirects are not proof of payment.
 
-## Configuration Overview
+## Documentation
 
-- Use the repository path as Vite's `base` for a GitHub Pages project site (currently expected to be `/midtrans/`).
-- Use `HashRouter` for straightforward SPA routing on GitHub Pages, unless a tested `BrowserRouter` fallback strategy is implemented.
-- Frontend build variables may contain only public values such as Supabase URL, Supabase anon key, and Midtrans Sandbox Client Key.
-- Store `MIDTRANS_SERVER_KEY` and Supabase service-role credentials only in Supabase backend secrets.
+Read these documents before implementation:
 
-## Implementation Requirements
+| Document | Purpose |
+|---|---|
+| [requirement.md](./requirement.md) | Product scope, customer journey, frontend behavior, and acceptance criteria |
+| [technical-spec.md](./technical-spec.md) | Database requirements, Edge Functions, Midtrans API, security, retry, and payment-state consistency |
+| [deployment.md](./deployment.md) | Vite configuration, GitHub Pages, environment variables, Supabase deployment, and Sandbox testing |
 
-The complete implementation contract—including checkout flow, database requirements, Edge Function behavior, retry/idempotency rules, Sandbox endpoints, frontend states, deployment guidance, and acceptance criteria—is maintained in **[REQUIREMENTS.md](./REQUIREMENTS.md)**.
-
-Implementers must read and follow that document before changing application code or database schema.
+The documents define planned requirements; they do not indicate that the application or deployment already exists.
 
 ## Official Documentation
 
