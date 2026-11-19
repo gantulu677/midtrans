@@ -16,13 +16,13 @@ This README defines the target requirements. It does not claim that the database
 | `create-snap-transaction` Edge Function | Required / planned |
 | `midtrans-notification` Edge Function | Required / planned |
 | Backend transaction verification and status updates | Required / planned |
-| Simple frontend checkout with Snap.js | Required / planned |
+| Existing Standard Storefront with Midtrans integrated into its checkout | Required / planned |
 
 ## Scope and Architecture
 
-The integration adds only the secure payment flow. Reuse the existing product catalogue, cart, authentication, and order functionality. Do not build a replacement catalogue, cart, order-management system, or admin dashboard.
+The integration adds only the secure payment flow to the existing Standard Storefront. Reuse its product catalogue, product detail views (if present), cart, checkout, authentication, and order functionality. Midtrans Snap is a payment step within the existing checkout—not a separate storefront or replacement checkout. Do not build a replacement catalogue, cart, order-management system, order history, or admin dashboard.
 
-- **Frontend:** displays existing products and checkout details, submits the existing order flow, invokes the authenticated payment function, and opens Sandbox Snap.js using the returned token.
+- **Frontend:** keeps the existing storefront navigation and components for product browsing, cart, and checkout; invokes the authenticated payment function from the existing checkout; opens Sandbox Snap.js using the returned token; and displays order status through the existing confirmation/status experience.
 - **Supabase Edge Functions:** create Snap transactions, verify Midtrans notifications, and update trusted payment/order state.
 - **Supabase PostgreSQL:** remains the source of truth for orders, order totals, and payment attempts.
 - **Midtrans Sandbox:** processes test payments and sends payment notifications to the notification function.
@@ -31,15 +31,15 @@ The Midtrans Server Key and Supabase elevated credentials must never be exposed 
 
 ## Required Purchase and Payment Flow
 
-1. **Select product** — The customer selects products and quantities using the existing application.
-2. **Checkout** — The customer reviews the selected items and proceeds through the existing checkout flow.
+1. **Browse and select products** — The customer browses the existing product catalogue and selects products and quantities using the Standard Storefront.
+2. **Shopping cart and checkout** — The customer reviews the cart and proceeds through the existing checkout page and flow. Do not create a separate Midtrans-only checkout page.
 3. **Create or retrieve order** — The application creates or retrieves an order through trusted backend logic. Validate product identifiers and quantities against database records. Calculate prices and totals on the backend; never trust prices or totals submitted by the browser. Reuse the existing secure order-creation mechanism. Add a minimal secure order-creation function only if no such mechanism exists.
-4. **Review order** — Display the saved order reference, item summary, and authoritative total returned from the backend.
+4. **Review checkout** — The existing checkout displays the saved order reference, item summary, and authoritative total returned from the backend before payment begins.
 5. **Start payment** — The authenticated frontend calls `create-snap-transaction` with the internal order ID only.
 6. **Open Snap** — The function validates ownership and payment eligibility, reads the saved order total, creates a unique Midtrans `order_id`, requests a Snap token from Sandbox, and returns the token. The frontend opens Sandbox Snap.js.
 7. **Complete payment** — The customer chooses a payment method and completes, abandons, or closes the Sandbox payment flow.
 8. **Verify payment** — Midtrans sends a notification to `midtrans-notification`. The function verifies the signature and reconciles the transaction with Midtrans Sandbox status data and the saved order/payment records.
-9. **Show final status** — The frontend reads the application's payment/order status. Show success only after the backend has verified the payment and persisted the paid state.
+9. **Show order result** — Return the customer to the existing order confirmation/status experience. The frontend reads the application's payment/order status and shows success only after the backend has verified the payment and persisted the paid state.
 
 ```text
 Select Product
@@ -193,40 +193,50 @@ Use HTTP Basic Authentication for backend Midtrans API requests: Base64-encode `
 
 For Snap requests, calculate `gross_amount` from trusted order data and send an integer in the amount unit expected by Midtrans for the selected currency. For IDR, send the rupiah amount as an integer (for example, `150000` for Rp150,000); do not multiply it by 100 or convert it to cents. Keep the amount consistent across the order, payment attempt, Snap request, notification, and status verification.
 
-## Frontend Checkout
+## Frontend Standard Storefront Integration
 
-Implement one simple responsive checkout/payment page using the repository's existing frontend framework and conventions. This is not a new catalogue, cart, order-management dashboard, or payment administration system.
+Integrate Midtrans into the application's **existing Standard Storefront**. Preserve the current frontend framework, routing, page structure, styling, and component conventions. Do not introduce a second storefront, a standalone payment application, or a replacement checkout page.
 
-### Page content
+The existing customer journey remains:
 
-Show only:
+1. **Product Catalog** — browse and select existing products.
+2. **Shopping Cart** — review selected products and quantities.
+3. **Existing Checkout** — review customer/order details and the authoritative order total.
+4. **Midtrans Snap Sandbox** — launch Snap as the payment step from the existing checkout after the backend creates a transaction.
+5. **Existing Order Confirmation / Status** — show the order result and payment status read from the authorized backend path.
 
-- Order reference.
-- A concise order/item summary, if available from the existing order data.
-- Authoritative order total.
-- **Pay Now** button.
-- Current payment state or a concise error message.
+Only integrate the payment action and the minimum payment-state display required by the existing checkout/confirmation experience. Reuse existing order detail, confirmation, and status routes/components where available. Do not add a new cart, catalogue, order history, customer dashboard, or payment administration UI for this integration.
 
-### Interaction
+### Checkout content and payment action
 
-1. Load the order through the application's existing authorized read path.
-2. Display only an order the signed-in customer is allowed to access.
-3. Enable **Pay Now** only when the backend indicates the order is eligible for payment.
-4. On click, call the authenticated `create-snap-transaction` function with the internal order ID only. Disable the button while the request is running.
-5. Load Sandbox Snap.js with the Sandbox Client Key and call `snap.pay(token, ...)` using the token returned by the Edge Function.
-6. Treat `onSuccess`, `onPending`, `onError`, and `onClose` as UI events only. They may trigger a refresh of the authorized order/payment status, but must never write a paid status.
-7. Refresh/read status through the application's authorized backend/database read path. The notification function is responsible for applying verified payment state.
+Within the existing checkout, show the order reference, concise item summary, authoritative order total, available payment action, and relevant payment state/error. Enable **Pay Now** only when the backend indicates that the order is eligible for payment.
+
+1. Load the order through the application's existing authorized read path and display only orders the signed-in customer may access.
+2. When the customer chooses **Pay Now**, call the authenticated `create-snap-transaction` function with the internal order ID only. Disable the action while the request is running.
+3. Load Sandbox Snap.js with the Sandbox Client Key and call `snap.pay(token, ...)` using the token returned by the Edge Function.
+4. Treat `onSuccess`, `onPending`, `onError`, and `onClose` as UI events only. They may trigger a refresh of authorized order/payment status, but must never write a paid status or be treated as proof of payment.
+5. After Snap closes or redirects, continue through the existing checkout/confirmation navigation. Read the latest status through the application's authorized backend/database read path. The notification function is responsible for applying verified payment state.
+
+### Snap callback behavior
+
+| Snap event | Frontend behavior |
+|---|---|
+| `onSuccess` | Refresh order/payment status. Show paid/success only if the backend reports verified paid status. |
+| `onPending` | Show that confirmation is pending and refresh status through the authorized read path. |
+| `onClose` | Return to or remain on the existing checkout/order experience. Do not assume failed, cancelled, or paid; show the latest backend status. Allow retry only if the backend says the order remains eligible. |
+| `onError` | Show a concise error, refresh backend status, and allow retry only if the order remains eligible. |
 
 ### Required UI states
 
 | State | Expected behavior |
 |---|---|
 | Loading | Show progress; payment is not yet available |
-| Ready to pay | Show order summary and total; enable Pay Now |
+| Ready to pay | Show existing checkout summary and total; enable Pay Now when eligible |
 | Creating transaction | Disable Pay Now and show progress |
 | Payment pending | Explain that confirmation is pending; allow status refresh |
 | Paid | Show success only after the backend reports verified paid status |
 | Failed / expired / cancelled | Show the backend-reported state; offer retry only if the order remains eligible |
+| Snap closed | Keep the customer in the existing checkout/order experience; do not infer a payment outcome from closing Snap |
 | Error | Show a concise error and allow a safe retry when appropriate |
 
 ## Local Development, Deployment, and Testing
