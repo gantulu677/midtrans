@@ -28,11 +28,28 @@ Verify that:
 | T-10 | Amount/currency mismatch | Not marked paid. |
 | T-11 | Duplicate notification | Same attempt reconciled; no duplicate record. |
 | T-12 | Stale/out-of-order notification | Paid state does not regress. |
-| T-13 | Concurrent Pay Now | At most one active attempt per order. |
+| T-13 | Concurrent Pay Now | Database serialization and unique order_id constraint ensure one active attempt; concurrent calls reuse it or return a safe conflict. |
 | T-14 | Snap closes | UI refreshes backend status; no outcome inferred from close. |
-| T-15 | Snap API timeout/lost response | Existing attempt/order ID reconciled before retry/new attempt. |
+| T-15 | Snap API timeout/lost response | Attempt becomes creation_unknown; same Midtrans order_id is retained and reconciled. No new identifier is generated merely due to timeout. |
+| T-18 | Snap Get Status returns 404 before payment-method selection | Treat as expected unresolved Snap state, not creation failure; retain same order_id and do not create a new distinct attempt. |
+| T-19 | Lost Snap token response; identifier still unused | Backend may recreate token with the same order_id; prior token invalidation is handled; no duplicate internal attempt is created. |
+| T-20 | Status API unavailable during reconciliation | Keep creation_unknown; no new attempt; retry reconciliation with backoff. |
+| T-21 | Concurrent Pay Now requests across sessions | Database lock/atomic claim serializes calls; unique order_id constraint prevents duplicate identifiers. |
+| T-22 | Failed attempt followed by a new successful attempt | Failed attempt remains failed; successful attempt makes order paid; failed notification cannot regress paid order. |
+| T-23 | Out-of-order notification after settlement | Current Midtrans status is queried; paid order remains paid. |
+| T-24 | Notification arrives while Get Status API is unavailable | No false state change and no HTTP 200 acknowledgment; transient failure returns retryable 503. |
+| T-25 | Notification persistence fails | No 2xx acknowledgment; retry can safely process the event later. |
+| T-26 | Duplicate notification after successful persistence | Return 2xx idempotently without duplicate records. |
+| T-27 | Invalid signature / unknown order identifier | Reject with client error and no state mutation. |
+| T-28 | Amount or currency mismatch, including decimal-formatted amount | Reject payment success; no rounding or floating-point acceptance. |
+| T-29 | Non-IDR order | Payment creation is rejected in v1. |
+| T-30 | Customer attempts direct payment-field write | RLS/grants deny the write; trusted backend remains the only writer. |
 | T-16 | Frontend asset inspection | No Server Key or service-role key in built assets. |
 | T-17 | Sandbox isolation | Browser Snap.js and backend API use Sandbox only. |
+
+## 2.1 State-machine and amount test expectations
+
+Test payment-attempt state independently from order payment state. Include valid and invalid transitions, repeated events, a failed attempt followed by a successful distinct attempt, and stale non-paid notifications after the order is paid. Confirm paid is monotonic at the order level. Confirm v1 rejects non-IDR orders and compares amounts exactly using integer rupiah semantics, including Midtrans decimal-string representations such as 150000.00.
 
 ## 3. UI state tests
 
