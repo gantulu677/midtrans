@@ -169,6 +169,81 @@ Load the Sandbox Snap.js using the Sandbox Client Key:
 
 The frontend obtains the Snap token from `create-snap-transaction` and uses it to open the payment interface. Do not call the Midtrans create-transaction API directly from the browser.
 
+
+
+## Simple Frontend Checkout Page
+
+The frontend is a single, minimal checkout page for paying an existing order with Midtrans Snap. It is a customer-facing payment page, not a shopping cart, order-management dashboard, or payment administration system.
+
+### Page requirements
+
+The page must show only the information needed to review and pay for an order:
+
+- Order reference or order number.
+- A concise order summary (items may be shown if already available to the frontend).
+- The order total, displayed using the authoritative amount returned by the application backend.
+- A **Pay Now** button.
+- A clear payment state or error message.
+
+Do not add product catalogue management, cart features, coupons, shipping workflows, customer administration, or other features that are not required for this payment flow.
+
+### Checkout interaction
+
+1. The customer opens the checkout page for an existing order.
+2. The frontend loads and displays that order's permitted summary and total from the application backend. It must not calculate or submit the payable amount as trusted input.
+3. The customer selects **Pay Now**.
+4. The frontend disables the button while the request is in progress to prevent accidental duplicate submissions.
+5. The frontend calls the authenticated `create-snap-transaction` Edge Function with the internal order ID.
+6. If the function returns a valid Snap token, the frontend opens the Midtrans Sandbox Snap interface using `snap.pay(token, ...)`.
+7. The frontend may show a temporary message after Snap closes or redirects, but must not treat the browser callback as proof of payment.
+8. The page obtains the current order/payment state from the application's trusted backend or database read path. The verified notification handler is responsible for applying the final payment state.
+
+### Required UI states
+
+| State | Expected behavior |
+|---|---|
+| Loading order | Show a loading indicator; do not enable payment yet. |
+| Ready to pay | Show the order summary and total with **Pay Now** enabled. |
+| Creating transaction | Disable **Pay Now** and show progress. |
+| Snap opened | Let the customer complete or leave the Sandbox payment flow. |
+| Pending / awaiting confirmation | Explain that payment confirmation is being processed; allow status refresh through the trusted application read path. |
+| Paid | Show success only when the backend/database reports the verified paid state. |
+| Failed / expired / cancelled | Show the state reported by the backend and provide a retry action only if the order remains eligible for payment. |
+| Error | Show a concise message and allow a safe retry when appropriate. |
+
+### Frontend integration contract
+
+**Request to `create-snap-transaction`:**
+- Send the authenticated user's request and the internal order ID.
+- Do not send an amount, customer ID, Midtrans Server Key, or a client-selected payment status as authoritative values.
+
+**Successful response:**
+- Must provide the Snap token required by `snap.pay`.
+- May provide a payment/order reference needed for subsequent status display.
+- Must not expose the Server Key or Supabase service-role credentials.
+
+**Snap.js behavior:**
+- Load only the Sandbox Snap.js script and use the Sandbox Client Key.
+- Use the token returned by the Edge Function.
+- Treat `onSuccess`, `onPending`, `onError`, and `onClose` callbacks as UI events only. They may trigger a status refresh, but must never write a paid status or override the backend's verified state.
+
+### Frontend acceptance criteria
+
+- [ ] A customer can view only an order they are authorized to access.
+- [ ] The page displays the order total from trusted application data.
+- [ ] The Pay Now action calls `create-snap-transaction` with the order ID, not a client-calculated amount.
+- [ ] Repeated clicks are prevented while transaction creation is in progress.
+- [ ] The Snap interface opens with the returned token and Sandbox configuration.
+- [ ] No Server Key or elevated Supabase credential is present in frontend code or browser requests.
+- [ ] Snap callbacks and browser redirects cannot mark an order as paid.
+- [ ] The paid state is displayed only after the backend reports a verified payment.
+- [ ] Pending, failed, expired, cancelled, and error states are presented clearly.
+- [ ] A retry is allowed only when the backend confirms that the order is eligible for another payment attempt.
+
+### Frontend scope
+
+The initial implementation should remain one simple responsive checkout page. Use the repository's existing frontend framework and styling conventions if present. Do not introduce a new framework, state-management library, routing system, or UI component library solely for this page.
+
 ## Local Development and Deployment
 
 Typical Supabase CLI workflow:
