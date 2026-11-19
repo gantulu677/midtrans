@@ -30,7 +30,12 @@ Do not display a client-calculated amount as the authoritative payable total.
 | Paid | Show success only after backend reports verified paid status. |
 | Failed / expired / cancelled | Show backend-reported state; offer retry only if order remains eligible. |
 | Snap closed | Keep customer in existing checkout/order experience; do not infer outcome. |
-| Error | Show concise error; allow safe retry only when appropriate. |
+| Error | Show concise error; refresh backend status; allow retry only when backend confirms it is safe. |
+| Creation unknown | Show reconciliation progress; do not create a second attempt or infer failure from a status API 404. |
+
+## 3.1 Unknown Snap creation outcome
+
+If the backend reports that Snap creation is unresolved, show a neutral “Checking payment session” state. Do not show payment failure and do not enable a new payment attempt. A status API 404 Payment not found may occur before the customer selects a payment method; it is not evidence that token creation failed. Keep the customer on the existing order experience while the backend reconciles the same attempt. Reopen or recreate a Snap token only when the backend explicitly returns a safe action for that same Midtrans order_id.
 
 ## 4. Snap callback behavior
 
