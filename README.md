@@ -18,6 +18,21 @@ This README defines the target requirements. It does not claim that the database
 | Backend transaction verification and status updates | Required / planned |
 | Existing Standard Storefront with Midtrans integrated into its checkout | Required / planned |
 
+## Technology Stack
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Frontend | React + Vite + TypeScript | Existing Standard Storefront, checkout UI, and Snap.js integration |
+| Backend | Supabase | Authentication, PostgreSQL, Row Level Security, and Edge Functions |
+| Payment | Midtrans Snap Sandbox | Customer payment experience and transaction processing |
+| Hosting / deployment | GitHub Pages | Static frontend hosting; no backend secrets or payment verification run in the browser |
+
+The frontend is a static React/Vite application deployed to GitHub Pages. Supabase remains the backend for trusted order/payment operations. GitHub Pages must not host or contain Server Keys, service-role keys, or other backend secrets. Deploy Supabase Edge Functions separately to Supabase.
+
+For a Vite project hosted at a GitHub Pages project URL, configure Vite's `base` path to match the repository path (for example, `/<repository-name>/`). Use `/` only when deploying to a user/organization root site or a custom domain configured for the site. The actual repository name and deployment URL must determine the final value.
+
+Frontend build-time environment variables are embedded in the generated static assets and are public. Only put browser-safe configuration there, such as the Midtrans Sandbox Client Key and Supabase project URL/anon key. Never put `MIDTRANS_SERVER_KEY` or the Supabase service-role key in Vite variables, GitHub Pages settings, or frontend source. Store backend secrets in Supabase Edge Function secrets.
+
 ## Scope and Architecture
 
 The integration adds only the secure payment flow to the existing Standard Storefront. Reuse its product catalogue, product detail views (if present), cart, checkout, authentication, and order functionality. Midtrans Snap is a payment step within the existing checkout—not a separate storefront or replacement checkout. Do not build a replacement catalogue, cart, order-management system, order history, or admin dashboard.
@@ -240,6 +255,21 @@ Within the existing checkout, show the order reference, concise item summary, au
 | Error | Show a concise error and allow a safe retry when appropriate |
 
 ## Local Development, Deployment, and Testing
+
+The React/Vite frontend and Supabase backend are deployed separately.
+
+### Frontend — GitHub Pages
+
+Build the Vite application and publish the generated `dist/` directory using the repository's GitHub Pages deployment workflow. The workflow should install dependencies, run the production build, and publish the build output. Configure the Vite `base` path for the actual GitHub Pages URL as described in [Technology Stack](#technology-stack).
+
+Example local build commands:
+
+```bash
+npm ci
+npm run build
+```
+
+Configure only public frontend values (for example, the Supabase project URL, Supabase anon key, and Midtrans Sandbox Client Key) as Vite build-time variables. These values are visible to users in the published JavaScript bundle. Do not configure backend secrets in GitHub Actions frontend build variables.
 
 Typical Supabase CLI commands:
 
