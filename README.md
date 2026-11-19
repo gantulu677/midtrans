@@ -10,8 +10,8 @@ This README defines the required backend design. It does not claim that the data
 
 | Component | Status |
 |---|---|
-| Supabase PostgreSQL product, order, order-item, and payment records | Required / planned |
-| Trusted order-creation backend path (existing secure path or small Edge Function) | Required / planned |\n| Edge Function: create Snap transaction | Required / planned |
+| Existing Supabase order and payment records | Required / planned |
+| Secure order creation (reuse existing application flow; add only if missing) | Required when no existing path |\n| Edge Function: create Snap transaction | Required / planned |
 | Edge Function: receive Midtrans notification | Required / planned |
 | Midtrans transaction status verification | Required / planned |
 | Frontend Snap.js integration | Required / planned |
@@ -20,131 +20,58 @@ This README defines the required backend design. It does not claim that the data
 
 - **Frontend:** displays products, manages a temporary cart, submits product identifiers and quantities for order creation, reviews the persisted order, invokes the authenticated payment Edge Function, and opens Snap.js with the returned transaction token.
 - **Supabase Edge Functions:** communicate with Midtrans, validate requests and notifications, and perform trusted database writes.
-- **Supabase PostgreSQL:** stores the application's orders and payment transaction records.
+- **Supabase PostgreSQL:** stores the application's orders and payment transaction records; reuse existing product and order tables.
 - **Midtrans Sandbox:** processes test payments and sends HTTP notifications to the notification Edge Function.
 
 The frontend must never receive the Midtrans Server Key or decide that an order is paid.
 
-## Customer Purchase Flow: Product Selection to Checkout
+## Required Purchase and Payment Flow
 
-This section describes the complete customer journey before and during payment. Keep the experience linear and minimal: product list, product selection, cart/review, checkout, and payment. The product catalogue and order data are application data in Supabase; Midtrans is used only after an order has been created.
+Keep the customer flow limited to the steps needed to create an order and pay through **Midtrans Sandbox**. Reuse the application's existing product catalogue, cart, authentication, and order functionality where available. Do not build a new catalogue or complex cart system as part of this integration.
 
-### Step-by-step flow
+1. **Select product** — The customer selects an available product and quantity using the existing frontend.
+2. **Checkout** — The customer reviews the selected product(s) and proceeds to checkout.
+3. **Create or retrieve order** — The application creates an order using trusted backend logic. Product identifiers and quantities are validated against Supabase data; prices and the total are calculated by the backend, never trusted from the browser. Reuse an existing secure order-creation flow. Add a minimal `create-order` function only if no such flow exists.
+4. **Review order** — The frontend displays the saved order reference, items, and authoritative total from the backend.
+5. **Create Snap transaction** — The authenticated frontend calls `create-snap-transaction` with the internal order ID only. The function checks order ownership and eligibility, reads the saved total, and requests a Snap token from the Midtrans Sandbox API.
+6. **Open payment page** — The frontend opens Midtrans Sandbox Snap.js using the returned token and Sandbox Client Key.
+7. **Complete payment** — The customer selects a payment method and completes or exits the Sandbox payment flow.
+8. **Verify notification** — Midtrans sends a notification to `midtrans-notification`. The function verifies the signature, order ID, amount, transaction status, and fraud status against the saved records.
+9. **Show final status** — The frontend reads the order/payment status from the application backend. Show success only after the verified backend state is paid.
 
-1. **Open the product page**
-   - The frontend loads the available products from the application's product catalogue in Supabase.
-   - Show only products that are available for purchase.
-   - Product name, description, image, displayed price, and availability come from the application backend/database.
-
-2. **Select a product**
-   - The customer opens a product and chooses any required option or variant.
-   - The customer selects a quantity.
-   - The frontend may calculate a provisional line subtotal for immediate display, but this value is only a preview and is not trusted by the backend.
-
-3. **Add to cart**
-   - The selected product/variant and quantity are added to a simple cart held by the frontend.
-   - The customer can change quantities or remove items before checkout.
-   - The cart displays item names, selected options, quantities, and provisional subtotals.
-   - No payment transaction is created at this stage.
-
-4. **Review the cart**
-   - The customer checks the selected items and quantities.
-   - The frontend displays a provisional subtotal/total based on the latest product data it has.
-   - The customer proceeds to checkout. The cart contents are still untrusted input until validated by the backend.
-
-5. **Create the order at checkout**
-   - The authenticated frontend submits only product/variant identifiers and quantities to a trusted order-creation backend path.
-   - The backend verifies product availability, valid variants, quantity limits, and current prices using Supabase data.
-   - The backend calculates the authoritative item subtotals and order total. It must ignore any client-supplied price, subtotal, discount, or total.
-   - The backend creates the order and its order-item records in PostgreSQL in one database transaction, then returns the internal order ID and a safe order summary.
-   - If the repository does not already have a secure order-creation path, implement a small authenticated `create-order` Edge Function for this purpose. Do not allow the browser to create trusted order totals directly.
-
-6. **Show the checkout review**
-   - The frontend displays the persisted order reference, items, quantities, and authoritative total returned by the backend.
-   - The customer confirms that the order is correct and selects **Pay Now**.
-   - If the order is no longer eligible or its data is stale, the backend must reject payment creation and the frontend should refresh the order.
-
-7. **Create the Midtrans Snap transaction**
-   - The frontend calls the authenticated `create-snap-transaction` Edge Function with the internal order ID only.
-   - The function verifies ownership and order eligibility, reads the persisted order total, creates a unique Midtrans `order_id`, and requests a Snap token from the Midtrans Sandbox API.
-   - The frontend opens Snap.js using the returned token.
-
-8. **Customer completes or leaves payment**
-   - The customer selects a payment method and follows the Midtrans Sandbox payment instructions.
-   - Snap.js callbacks may show temporary user-interface messages, but do not update the trusted payment or order status.
-
-9. **Receive and verify payment notification**
-   - Midtrans sends the notification to `midtrans-notification`.
-   - The Edge Function verifies the signature and transaction status, and matches the Midtrans order ID and amount against the stored payment and application order.
-   - Only verified, accepted successful transactions may move the order to the paid state.
-
-10. **Display the final order status**
-    - The frontend refreshes the order/payment state through the application's authorized read path.
-    - Show success only when the database reports the verified paid state.
-    - Otherwise show pending, failed, expired, or cancelled as reported by the backend. Offer retry only when the order remains eligible for another payment attempt.
-
-### Flow at a glance
+### Flow summary
 
 ```text
-Product List
-    |
-Select Product / Variant / Quantity
-    |
-Add to Cart
-    |
-Review Cart
-    |
-Checkout
-    |
-Trusted Backend Validates Products and Prices
-    |
-Create Order + Order Items in Supabase
-    |
-Display Persisted Order Summary
-    |
-Pay Now
-    |
+Select Product and Quantity
+          |
+       Checkout
+          |
+ Create / Retrieve Order
+ (trusted backend validation)
+          |
+    Review Order Total
+          |
+       Pay Now
+          |
 create-snap-transaction
-    |
-Midtrans Sandbox Snap
-    |
-Customer Completes Payment
-    |
-midtrans-notification
-    |
-Verify Signature + Status + Amount + Order
-    |
-Update Payment and Order in Supabase
-    |
-Frontend Reads Verified Order Status
+          |
+ Midtrans Sandbox Snap
+          |
+   Customer Payment
+          |
+ midtrans-notification
+          |
+ Verify and Update Database
+          |
+ Display Verified Order Status
 ```
 
-### Responsibilities by layer
+### Scope
 
-| Layer | Responsibility |
-|---|---|
-| Frontend | Display products, manage temporary cart selection, collect quantities/options, show checkout summary, open Snap.js, and display backend-reported status. |
-| Supabase PostgreSQL | Store product catalogue, orders, order items, and payment transactions; enforce ownership and data access rules. |
-| Trusted order-creation backend | Validate product identifiers, availability, variants, and prices; calculate totals and create the order atomically. |
-| `create-snap-transaction` | Create a Midtrans Sandbox Snap transaction for an existing eligible order using the persisted total. |
-| `midtrans-notification` | Verify Midtrans notification and update payment/order state safely. |
-| Midtrans Sandbox | Present payment methods, process test payments, and send transaction notifications. |
-
-### Minimum order data
-
-An order must have related order-item records so that the purchased products and quantities can be reviewed later. Each order item should preserve a purchase-time snapshot of at least the product name/description or display name, selected variant when applicable, quantity, unit price, and line subtotal. Historical order totals must not change when the current product catalogue price is edited.
-
-### Purchase-flow acceptance criteria
-
-- [ ] Customers can browse available products and select a valid variant and quantity when applicable.
-- [ ] Customers can add, update, and remove items in the cart before checkout.
-- [ ] Cart totals shown in the browser are treated as previews only.
-- [ ] The backend revalidates product availability, variants, quantities, and current prices at order creation.
-- [ ] The backend calculates the authoritative total; client-supplied prices and totals are ignored.
-- [ ] The order and its item snapshots are created consistently before payment begins.
-- [ ] The checkout page displays the persisted order summary and total.
-- [ ] Midtrans transaction creation uses the persisted order total, not cart data from the browser.
-- [ ] Final payment state is based on verified Midtrans notification processing, not browser callbacks.
+- Product browsing, cart behavior, and order creation are existing application responsibilities, except for the minimal secure order-creation path needed if one does not already exist.
+- This integration adds only the Midtrans Sandbox payment flow and the required secure connection to the application's order records.
+- Do not add coupons, shipping workflows, product administration, customer dashboards, or other unrelated checkout features.
+- Browser callbacks and redirects are informational only. They must never mark an order as paid.
 
 ## Payment Flow
 
@@ -202,22 +129,7 @@ The exact SQL migration must match the application's existing schema before impl
 
 Keep the backend minimal. Reuse an existing secure order-creation path if the application already has one; otherwise add only the small order-creation function described below, alongside the two payment functions.
 
-### 1. `create-order` (only if no secure order-creation path exists)
-
-**Caller:** authenticated frontend.
-
-Responsibilities:
-- Require and validate the Supabase user session.
-- Accept product/variant identifiers and quantities only.
-- Validate that each product and variant exists and is available for purchase.
-- Read current prices from trusted database records; ignore client-supplied prices and totals.
-- Validate quantity limits and calculate line subtotals and the authoritative order total.
-- Create the order and its order-item purchase snapshots atomically.
-- Return the internal order ID and a safe order summary.
-
-Do not create a payment transaction in this function. Payment creation remains the responsibility of `create-snap-transaction`.
-
-### 2. `create-snap-transaction`
+### 1. `create-snap-transaction`
 
 **Caller:** authenticated frontend.
 
@@ -234,7 +146,7 @@ Responsibilities:
 
 Never trust a frontend amount, customer ID, order status, or payment-success flag.
 
-### 3. `midtrans-notification`
+### 2. `midtrans-notification`
 
 **Caller:** Midtrans HTTP notification service.
 
