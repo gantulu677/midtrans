@@ -83,6 +83,29 @@ Reuse the existing secure order-creation flow. A third order function is not req
 - Verified paid state cannot regress because of stale notifications.
 - No production payment configuration is included.
 
+## 5.1 Payment attempt lifecycle and concurrency
+
+The payment attempt lifecycle is distinct from the order payment state. The following are conceptual states; actual schema names must follow database inspection:
+- creating → token_ready or creation_unknown.
+- creation_unknown remains unresolved until reconciled; timeout or lost response is not a failure result.
+- token_ready → pending when Midtrans assigns a transaction status; it may then become paid, failed, expired, or cancelled after verified status.
+- A new distinct attempt may be considered only after the previous attempt is conclusively terminal and the order remains unpaid and eligible.
+- A paid attempt makes the order payment state paid. No later event may regress it. A failed attempt cannot override a separate paid attempt.
+
+Serialize Pay Now requests in trusted backend/database logic, not with a frontend disabled button alone. Use a database transaction/row lock or equivalent atomic claim for the order, plus a unique constraint on each persisted Midtrans order_id. Define the active-attempt set as creating, creation_unknown, token_ready, and pending. Concurrent requests must reuse the same eligible attempt or return a safe conflict. Do not create another attempt while any attempt is active.
+
+Midtrans Snap supports re-creating a token for an unused Snap order_id before the customer chooses a payment method; doing so invalidates the previous token. Once a payment method is selected and the transaction has a status (for example pending), the same order_id cannot be used to create a new Snap transaction. Reopen the existing token where still valid, or reconcile the transaction; do not assume a new token can be created for a used identifier.
+
+Do not assume generic Midtrans Idempotency-Key support applies to the Snap Create Transaction endpoint. The v1 contract relies on local database serialization, unique order_id, and reconciliation unless Midtrans explicitly confirms endpoint-specific support.
+
+## 5.2 Snap status 404 and recovery
+
+A Core API Get Status 404 Payment not found may be expected after Snap token creation and before the customer selects a payment method. Treat it as “not yet assigned a payment status”, not as evidence that the create request failed. Keep the same attempt and Midtrans order_id. If the token response was lost, backend may recreate a token with that same unused identifier in accordance with Snap documentation; if status lookup is unavailable or the identifier may already be in use, retain creation_unknown and defer retry until reconciled. Never generate a new identifier solely due to timeout or 404.
+
+## 5.3 Notification acknowledgement contract
+
+The notification handler must validate signature and identify the persisted attempt before applying changes. Persist verified state durably before acknowledging success. Return HTTP 2xx only when the notification has been safely handled or is a confirmed duplicate. Return a client-error response for malformed/invalid-signature/unknown identifiers; return a retryable server error (prefer 503) when the handler cannot verify or durably persist because a dependency is unavailable. Do not acknowledge an unprocessed notification with 200. Keep processing fast (target under five seconds) and rely on Midtrans retry behavior plus later reconciliation for transient failures.
+
 ## 6. Actual architecture verification
 
 Before implementation, inspect the repository's actual entry point, router, Supabase client, auth flow, checkout, order persistence, and deployment setup. Update this diagram if the real structure differs. Do not create duplicate application layers to match a conceptual diagram.
