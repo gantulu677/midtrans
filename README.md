@@ -10,7 +10,7 @@ This repository currently contains documentation only. The application, database
 
 | Area | Target |
 |---|---|
-| Frontend | React + Vite + TypeScript |
+| Frontend | React 19 + Vite + TypeScript + Tailwind CSS v4 + Konsta UI React v5 |
 | Backend | Supabase Auth, PostgreSQL, RLS, and Edge Functions |
 | Payment | Midtrans Snap Sandbox |
 | Frontend hosting | GitHub Pages |
@@ -45,6 +45,8 @@ The documents define planned requirements; they do not indicate that the applica
 - [Midtrans Sandbox Testing](https://docs.midtrans.com/docs/testing-payment-on-sandbox)
 - [Supabase Edge Functions](https://supabase.com/docs/guides/functions)
 - [Supabase Row Level Security](https://supabase.com/docs/guides/database/secure-data)
+- [Tailwind CSS v4 — Vite Installation](https://tailwindcss.com/docs/installation/using-vite)
+- [Konsta UI React](https://konstaui.com/react)
 
 ---
 
