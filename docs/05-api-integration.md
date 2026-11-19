@@ -79,9 +79,9 @@ order_id + status_code + gross_amount + MIDTRANS_SERVER_KEY
 
 Then:
 1. Find payment attempt by exact Midtrans `order_id`; reject unknown/mismatched identifiers.
-2. Compare notification amount and currency, where available, with saved attempt and order.
+2. Require the notification amount to match the saved attempt and order. Require currency to be IDR when the field is present; the v1 order and attempt are always IDR.
 3. Query Midtrans Sandbox Get Transaction Status API.
-4. Confirm status response refers to expected transaction and amount.
+4. Confirm status response refers to the expected transaction, exact amount, and IDR currency.
 5. Treat as paid only when verified response has `status_code` `200` and `transaction_status` is `settlement` or accepted `capture`.
 6. If `fraud_status` is present, require `accept` for both settlement and capture.
 7. Persist verified details and update payment/order state atomically where practical.
@@ -90,6 +90,8 @@ Then:
 A verified paid order must never regress to pending, failed, expired, or cancelled. A failed attempt must not override a separate verified successful attempt.
 
 Deploy this external endpoint without Supabase JWT verification when necessary (e.g. `--no-verify-jwt`), while always enforcing Midtrans signature and status verification internally.
+
+### Notification HTTP response contract
 
 | Condition | HTTP response | Required behavior |
 |---|---:|---|
