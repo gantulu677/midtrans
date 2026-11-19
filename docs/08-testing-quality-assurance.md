@@ -31,7 +31,7 @@ Verify that:
 | T-13 | Concurrent Pay Now | Database serialization and unique order_id constraint ensure one active attempt; concurrent calls reuse it or return a safe conflict. |
 | T-14 | Snap closes | UI refreshes backend status; no outcome inferred from close. |
 | T-15 | Snap API timeout/lost response | Attempt becomes creation_unknown; same Midtrans order_id is retained and reconciled. No new identifier is generated merely due to timeout. |
-| T-18 | Snap Get Status returns 404 before payment-method selection | Treat as expected unresolved Snap state, not creation failure; retain same order_id and do not create a new distinct attempt. |
+| T-18 | Snap Get Status returns 404 before payment-method selection | Treat the 404 Payment not found response as an expected unresolved Snap state before payment-method selection, not creation failure; retain the same order_id and do not create a new distinct attempt. |
 | T-19 | Lost Snap token response; identifier still unused | Backend may recreate token with the same order_id; prior token invalidation is handled; no duplicate internal attempt is created. |
 | T-20 | Status API unavailable during reconciliation | Keep creation_unknown; no new attempt; retry reconciliation with backoff. |
 | T-21 | Concurrent Pay Now requests across sessions | Database lock/atomic claim serializes calls; unique order_id constraint prevents duplicate identifiers. |
