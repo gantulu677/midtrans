@@ -44,6 +44,30 @@ Enforce uniqueness on Midtrans `order_id`. Persist enough data to match notifica
 
 Actual policy expressions must be based on the inspected schema and user/order relationship. Do not invent table or column names.
 
+## 3.1 Attempt uniqueness, locking, and state semantics
+
+These are logical requirements, not a prescribed SQL schema:
+- Enforce a unique database constraint/index for each Midtrans order_id.
+- Serialize payment-attempt creation per internal order using a database transaction with row-level locking or an equivalent atomic compare-and-set mechanism. A frontend button lock is only a UX aid and is not a concurrency guarantee.
+- Treat creating, creation_unknown, token_ready, and pending as active attempt states. A second concurrent request must reuse the active attempt or return a safe conflict.
+- A new distinct attempt is eligible only after the previous attempt is conclusively terminal (failed, expired, or cancelled) and the order remains unpaid and eligible. A 404 Payment not found from Get Status after Snap token creation is not a terminal state.
+- Keep attempt status separate from order payment status. An attempt's failure cannot override another attempt's verified success. Once the order payment state is paid, it is immutable to non-paid transitions.
+- Conceptual state labels must be mapped to the actual schema only after inspection; do not invent table, column, enum, or policy names.
+
+Do not rely on generic Midtrans Idempotency-Key support for Snap Create Transaction unless endpoint-specific support is confirmed. Local atomicity and unique identifiers are mandatory regardless.
+
+## 3.2 Amount and currency contract
+
+Version 1 is IDR-only. Trusted backend logic derives the payable total from saved order/item data, using an exact integer rupiah representation; do not use floating-point arithmetic. Persist the exact amount and IDR currency on the payment attempt. Match amount and currency against the order, Snap request, notification, and Get Status response before accepting a paid state. Reject a mismatch or non-IDR order; never silently round. Midtrans may represent notification/status gross_amount as a decimal string such as 150000.00; parse it as an exact decimal and compare numerically to the expected integer rupiah amount, without binary floating-point comparison.
+
+## 4.1 Notification persistence and acknowledgement
+
+The notification handler must durably persist the verified attempt/order transition before returning HTTP 2xx. A duplicate notification that is already durably reconciled may return 2xx without creating duplicate records. Invalid JSON, invalid signature, or an unknown/mismatched order_id must not change payment data and should receive a client-error response. If Midtrans Get Status, the database, or another required dependency is unavailable, do not mark the event handled and do not return 200; return a retryable server error (503 is preferred for temporary dependency failure). Keep the handler fast, targeting less than five seconds, and make processing idempotent because notifications can be retried or arrive out of order.
+
+## 4.2 Credential and client access boundary
+
+Customer-facing clients may read only the minimum order/payment summary needed for their own authorized account, through RLS and/or a backend authorization check. They must never write trusted attempt state, order payment state, amount/currency verification, Midtrans transaction identity, signature result, or fraud status. Elevated credentials may bypass RLS only inside trusted Edge Functions; every such function must still validate ownership for customer-initiated actions. The external notification function has no customer session, so it must authenticate Midtrans using signature verification and then resolve the exact stored attempt. Do not expose service-role credentials or assume that merely enabling RLS makes an elevated backend action safe.
+
 ## 5. Supabase Edge Functions
 
 ### `create-snap-transaction`
@@ -52,7 +76,8 @@ Actual policy expressions must be based on the inspected schema and user/order r
 - Confirms order ownership and payment eligibility.
 - Reads trusted order total and currency.
 - Does not accept client amount, customer ID, status, or paid flag as authoritative.
-- Creates/reuses a persisted payment attempt.
+- Atomically claims or reuses the persisted active attempt under a per-order lock.
+- On timeout/lost response, persists creation_unknown and retains the same Midtrans order_id; never creates a second identifier until reconciliation.
 - Enforces concurrency so at most one active attempt exists per order.
 - Calls Midtrans Sandbox using the Server Key.
 - Returns Snap token and minimal references only.
@@ -64,6 +89,9 @@ Actual policy expressions must be based on the inspected schema and user/order r
 - Must still verify Midtrans signature and transaction details itself.
 - Finds the exact attempt by Midtrans `order_id`.
 - Verifies status with Midtrans Sandbox status API.
+- Queries status and validates exact amount/currency before applying state changes.
+- Persists the state transition durably before returning HTTP 2xx.
+- Returns 2xx for safely processed/confirmed duplicate notifications; invalid signature/unknown identifier receives a client error; transient status/database failures receive a retryable server error (prefer 503), not 200.
 - Updates attempt/order idempotently and prevents invalid state regression.
 
 Example deployment flag for the notification endpoint: `--no-verify-jwt`. This disables Supabase JWT verification only; it does not disable Midtrans signature verification.
