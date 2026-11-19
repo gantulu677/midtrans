@@ -7,12 +7,21 @@ This document defines **how the trusted payment integration must work**. It is t
 
 ## Architecture and Trust Boundaries
 
-- **Frontend:** React/Vite storefront. It requests payment creation and displays backend-reported order/payment status.
+- **Frontend:** React 19 + Vite + TypeScript storefront, styled with Tailwind CSS v4 and using Konsta UI React v5 where appropriate. It requests payment creation and displays backend-reported order/payment status.
 - **Supabase PostgreSQL:** source of truth for orders, order totals, and payment attempts.
 - **Supabase Edge Functions:** trusted order/payment operations, Snap transaction creation, notification verification, and state updates.
 - **Midtrans Sandbox:** payment processing and notification delivery.
 
 The browser must never receive the Midtrans Server Key or Supabase service-role key. The frontend must never determine or write that an order is paid.
+
+## Frontend Technology Constraints
+
+- Use React 19, Vite, and TypeScript.
+- Use Tailwind CSS v4 with the official `@tailwindcss/vite` Vite plugin.
+- Use Konsta UI React v5 (`konsta`) for suitable reusable UI components. Konsta UI v5 targets React 19.
+- Import Konsta's theme stylesheet from the application's main CSS entry point. Choose the Konsta `ios` or `material` theme consistently with the existing storefront; do not redesign unrelated screens.
+- Keep payment logic and backend trust boundaries independent of presentation components. Konsta components must not write payment status or bypass the existing authorized data flow.
+- If the actual repository's React version or frontend setup differs, inspect it before implementation and resolve compatibility deliberately; do not blindly replace the existing application structure.
 
 ## Order and Payment Data Requirements
 
