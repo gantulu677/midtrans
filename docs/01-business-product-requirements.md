@@ -85,12 +85,26 @@ Snap callbacks, browser redirects, and return URLs are UI signals only; they are
 | AC-07 | Amount/currency mismatch | Payment is not marked paid. |
 | AC-08 | Duplicate notification | Reconcile existing attempt; do not create a duplicate payment record. |
 | AC-09 | Stale/out-of-order notification | Verified paid order never regresses to a non-paid state. |
-| AC-10 | Concurrent Pay Now requests | At most one active attempt per order; reuse it or return a safe conflict. |
+| AC-10 | Concurrent Pay Now requests | Database-backed serialization allows only one active attempt; concurrent callers receive the same reusable attempt or a safe conflict. |
 | AC-11 | Snap closes/redirects | Refresh authorized backend status; callback/redirect alone never determines outcome. |
 | AC-12 | Customer reads order/payment | Return only records authorized for that authenticated customer. |
 | AC-13 | Frontend bundle | No Server Key or service-role key in frontend assets/build variables. |
 | AC-14 | Sandbox isolation | All Midtrans requests and Snap.js use Sandbox endpoints and credentials only. |
-| AC-15 | Unknown Snap creation outcome | Reconcile the existing attempt using the same Midtrans order identifier before considering another attempt. |
+| AC-15 | Unknown Snap creation outcome | Preserve the attempt and its Midtrans order_id; reconcile it before retrying. A Core API 404 Payment not found after Snap token creation is not proof that creation failed. |
+
+## 6.1 Payment state and currency rules
+
+Version 1 supports IDR only. Trusted backend logic derives the payable total from the saved order and saved item/price data. The exact integer rupiah amount and IDR currency must match across the order, payment attempt, Snap request, notification, and verified Get Status response. Do not use floating-point arithmetic or accept client totals. Reject non-IDR orders; multi-currency support is out of scope.
+
+Keep two separate state concepts:
+- Payment-attempt state: creating, creation_unknown, token_ready, pending, paid, failed, expired, or cancelled.
+- Order payment state: unpaid, pending, or paid. Keep any existing order fulfillment/lifecycle status separate.
+
+These are conceptual contract values, not prescribed database enum or column names. A paid attempt may make its order paid. A failed/expired/cancelled attempt does not make the order paid and cannot override another paid attempt. Order payment state is monotonic: once verified paid, it never returns to a non-paid state. A new distinct attempt may be considered only after the previous attempt is conclusively terminal and the order remains eligible.
+
+## 6.2 Snap creation uncertainty
+
+A timeout, lost HTTP response, or process interruption after sending the Snap create request leaves the attempt in creation_unknown; it does not prove failure. Preserve its existing Midtrans order_id. A Core API Get Status 404 Payment not found can be normal after Snap token creation while the customer has not selected a payment method. Do not generate a new Midtrans order_id because of that 404. Reconcile using the same identifier and, where appropriate, recreate the Snap token using that same order_id in accordance with Midtrans Snap behavior. If status cannot be established, keep the attempt unresolved and do not create another distinct attempt.
 
 ## 7. Open implementation dependencies
 
