@@ -31,7 +31,37 @@ The frontend is a static React/Vite application deployed to GitHub Pages. Supaba
 
 For a Vite project hosted at a GitHub Pages project URL, configure Vite's `base` path to match the repository path (for example, `/<repository-name>/`). Use `/` only when deploying to a user/organization root site or a custom domain configured for the site. The actual repository name and deployment URL must determine the final value.
 
+For this repository's standard GitHub Pages project site, the expected Vite setting is:
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  base: "/midtrans/",
+});
+```
+
+Use `base: "/"` only if the site is deployed at a domain root (for example, a configured custom domain or the account's user/organization site). Recheck the setting if the repository name or Pages URL changes.
+
+### React SPA routing on GitHub Pages
+
+GitHub Pages serves static files and does not provide automatic fallback routing for React routes. A direct visit or browser refresh on a nested `BrowserRouter` URL can return 404.
+
+For the simplest GitHub Pages deployment, use React Router's `HashRouter` so client-side routes remain after the `#` and do not require server-side rewrites. If the existing storefront must keep `BrowserRouter`, document and implement a GitHub Pages-compatible `404.html` redirect/restore strategy, and test direct navigation and refresh on nested routes. Do not assume that configuring Vite `base` alone solves SPA routing.
+
 Frontend build-time environment variables are embedded in the generated static assets and are public. Only put browser-safe configuration there, such as the Midtrans Sandbox Client Key and Supabase project URL/anon key. Never put `MIDTRANS_SERVER_KEY` or the Supabase service-role key in Vite variables, GitHub Pages settings, or frontend source. Store backend secrets in Supabase Edge Function secrets.
+
+For Vite, expose browser configuration through `VITE_`-prefixed variables, for example:
+
+```env
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+VITE_MIDTRANS_CLIENT_KEY=
+```
+
+Never define `VITE_MIDTRANS_SERVER_KEY` or `VITE_SUPABASE_SERVICE_ROLE_KEY`. Any `VITE_` value included in a frontend build must be treated as public.
 
 ## Scope and Architecture
 
@@ -149,6 +179,14 @@ Responsibilities:
 
 For a new payment attempt, the Midtrans `order_id` must be unique. Do not reuse an identifier already used for a different Midtrans transaction. A retry must follow the persisted order/payment state and retry policy. Concurrent requests must be serialized so that only one active attempt exists for an order at a time; enforce this with an atomic claim/transaction and database uniqueness or an equivalent mechanism, not only a frontend button lock.
 
+Apply these retry rules consistently:
+
+- **Duplicate request while creating:** return/reuse the same persisted active attempt; do not create another Midtrans transaction.
+- **Snap reopened for the same active transaction:** reuse that attempt and its valid transaction/token according to the backend's persisted state and Midtrans response. Do not issue a new `order_id` merely because the customer clicked Pay Now again.
+- **New transaction after the previous attempt is terminal and the order remains payable:** create a new payment-attempt record and a new unique Midtrans `order_id`.
+- **Unknown outcome or pending transaction:** reconcile with Midtrans status before deciding whether another attempt is allowed. Do not create a parallel attempt while the previous one may still be payable.
+- Enforce Midtrans's documented `order_id` length and character constraints when generating identifiers (including the 50-character maximum for Snap).
+
 ### 2. `midtrans-notification`
 
 **Caller:** Midtrans HTTP notification service.
@@ -169,6 +207,9 @@ Responsibilities:
 - Treat a transaction as paid only when the verified Midtrans status response has `status_code` `200` and `transaction_status` is `settlement` or an accepted `capture`. Whenever `fraud_status` is present, require it to be `accept` for both `settlement` and `capture`; do not mark a transaction paid when the fraud status is `challenge` or another non-accepted value.
 - Persist the verified Midtrans transaction details and update the order/payment state atomically where practical.
 - Handle repeated and out-of-order notifications idempotently. A stale notification must not downgrade an already verified paid order.
+- Apply explicit, monotonic order/payment state rules: a verified paid order must never transition back to pending, failed, expired, or cancelled because of a duplicate or stale notification. A non-paid notification must not overwrite a verified successful payment attempt.
+- Update the order only from the payment attempt matched to that order and verified Midtrans transaction. If an order has multiple attempts, a successful attempt may mark the order paid; a failed/expired/cancelled attempt must not override a different verified successful attempt.
+- Make payment-attempt updates idempotent using the unique Midtrans `order_id` and persisted transaction identity. Repeated notifications update/reconcile the existing attempt rather than inserting a duplicate.
 - Keep notification processing efficient and return an appropriate HTTP response in under 5 seconds where practical, so Midtrans can determine promptly whether delivery succeeded. Avoid unnecessary blocking or long-running work in the notification request.
 
 Configure the notification function to accept external Midtrans requests without requiring a Supabase user JWT (for example, deploy with `--no-verify-jwt`). The function must still verify the Midtrans signature and transaction details itself. Disabling Supabase JWT verification does **not** mean trusting the request.
@@ -270,6 +311,63 @@ npm run build
 ```
 
 Configure only public frontend values (for example, the Supabase project URL, Supabase anon key, and Midtrans Sandbox Client Key) as Vite build-time variables. These values are visible to users in the published JavaScript bundle. Do not configure backend secrets in GitHub Actions frontend build variables.
+
+A minimal GitHub Actions workflow can use the official Pages artifact/deployment actions. Save it as `.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_MIDTRANS_CLIENT_KEY: ${{ vars.VITE_MIDTRANS_CLIENT_KEY }}
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+In repository settings, set **Pages → Build and deployment → Source** to **GitHub Actions**. Add the three public `VITE_` values as repository Actions variables (or provide them through another safe build-time configuration). They are public after bundling; do not store Server Key or service-role credentials in Actions variables or secrets for the frontend build. Supabase backend secrets are configured separately in Supabase.
 
 Typical Supabase CLI commands:
 
