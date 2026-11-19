@@ -53,8 +53,7 @@ A single Snap order_id can receive multiple payment-method attempts/notification
 
 ## 2.2 Idempotency and concurrent requests
 
-The v1 safety guarantee comes from local database serialization per order and a unique constraint on Midtrans order_id. Do not assume Midtrans generic Idempotency-Key behavior applies to POST /snap/v1/transactions; only use it if Midtrans confirms support for this exact endpoint. Concurrent Pay Now requests must resolve to the same active attempt or a safe conflict. Active attempt states are creating, creation_unknown, token_ready, and pending.
-
+The v1 safety guarantee comes from local database serialization per order and a unique constraint on Midtrans order_id. Do not assume Midtrans generic Idempotency-Key behavior applies to POST /snap/v1/transactions; only use it if Midtrans confirms support for this exact endpoint. Concurrent Pay Now requests must resolve to the same active attempt or a safe conflict. Active attempt states are creating, creation_unknown, token_ready, and pending. Keep these attempt states separate from the order payment state, which is unpaid, pending, or paid; any existing fulfillment/order lifecycle remains separate. A verified successful attempt may move the order payment state to paid, and no later failed or stale attempt may move it back.
 
 ## 3. Midtrans Snap browser integration
 
